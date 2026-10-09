@@ -1,12 +1,10 @@
 
-import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-
 import streamlit as st
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
 # =====================================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÃO
 # =====================================================
 
 st.set_page_config(
@@ -17,17 +15,41 @@ st.set_page_config(
 
 
 # =====================================================
+# ESTADO DOS CAMPOS
+# =====================================================
+
+CAMPOS = ["ipca", "preco_anterior", "ci"]
+
+for campo in CAMPOS:
+    if campo not in st.session_state:
+        st.session_state[campo] = ""
+
+if "texto_final" not in st.session_state:
+    st.session_state.texto_final = ""
+
+if "preco_negociado" not in st.session_state:
+    st.session_state.preco_negociado = ""
+
+
+def limpar_para_proximo_cliente():
+    """Limpa os campos e os resultados do cliente atual."""
+    for campo in CAMPOS:
+        st.session_state[campo] = ""
+
+    st.session_state.texto_final = ""
+    st.session_state.preco_negociado = ""
+
+
+# =====================================================
 # FUNÇÕES AUXILIARES
 # =====================================================
 
 def converter_decimal(valor):
-    """Converte números com vírgula decimal para Decimal."""
     valor = valor.strip().replace("R$", "").replace(" ", "")
 
     if not valor:
         raise ValueError("Preencha o campo.")
 
-    # Aceita formatos como 6,9588 ou 1.234,5678.
     if "," in valor:
         valor = valor.replace(".", "").replace(",", ".")
 
@@ -35,10 +57,8 @@ def converter_decimal(valor):
 
 
 def formatar_decimal(valor, casas=4):
-    """Formata número com vírgula decimal e casas definidas."""
-    quantizacao = Decimal("1").scaleb(-casas)
     valor = valor.quantize(
-        quantizacao,
+        Decimal("1").scaleb(-casas),
         rounding=ROUND_HALF_UP
     )
 
@@ -49,8 +69,11 @@ def formatar_decimal(valor, casas=4):
 
 
 def formatar_ipca(valor):
-    """Formata o percentual com duas casas decimais."""
-    return f"{valor.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}".replace(".", ",") + "%"
+    valor = valor.quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP
+    )
+    return f"{valor:.2f}".replace(".", ",") + "%"
 
 
 # =====================================================
@@ -71,47 +94,45 @@ st.markdown(
 
 st.subheader("Dados do reajuste")
 
-ipca = st.text_input(
+st.text_input(
     "IPCA acumulado em 12 meses (%)",
-    value="4,58",
-    help="Informe o índice acumulado publicado pelo IBGE."
+    key="ipca",
+    placeholder="Ex.: 4,58"
 )
 
-preco_anterior = st.text_input(
+st.text_input(
     "Preço Anterior (R$)",
-    value="6,9588",
-    help="Informe o preço atual antes da aplicação do reajuste."
+    key="preco_anterior",
+    placeholder="Ex.: 6,9588"
 )
 
-ci = st.text_input(
+st.text_input(
     "CI (preenchimento manual)",
+    key="ci",
     placeholder="Digite o número do CI"
 )
 
 
 # =====================================================
-# GERAÇÃO DO TEXTO
+# CÁLCULO E GERAÇÃO DO TEXTO
 # =====================================================
 
 if st.button("Calcular reajuste e gerar texto", type="primary"):
 
     try:
-        ipca_numero = converter_decimal(ipca)
-        preco_numero = converter_decimal(preco_anterior)
+        ipca_numero = converter_decimal(st.session_state.ipca)
+        preco_numero = converter_decimal(st.session_state.preco_anterior)
 
         if not Decimal("0") <= ipca_numero <= Decimal("100"):
-            raise ValueError(
-                "O IPCA deve estar entre 0% e 100%."
-            )
+            raise ValueError("O IPCA deve estar entre 0% e 100%.")
 
         if preco_numero <= 0:
-            raise ValueError(
-                "O preço anterior deve ser maior que zero."
-            )
+            raise ValueError("O preço anterior deve ser maior que zero.")
 
-        # Calcula o preço reajustado e arredonda para 4 casas.
         preco_negociado = (
-            preco_numero * (Decimal("1") + ipca_numero / Decimal("100"))
+            preco_numero * (
+                Decimal("1") + ipca_numero / Decimal("100")
+            )
         ).quantize(
             Decimal("0.0001"),
             rounding=ROUND_HALF_UP
@@ -122,12 +143,11 @@ if st.button("Calcular reajuste e gerar texto", type="primary"):
         negociado_formatado = formatar_decimal(preco_negociado)
 
         ci_formatado = (
-            ci.strip()
-            if ci.strip()
+            st.session_state.ci.strip()
+            if st.session_state.ci.strip()
             else "____________________"
         )
 
-        # Texto padrão preservado.
         texto_final = (
             "Aniversário de contrato\n"
             "\n"
@@ -140,43 +160,70 @@ if st.button("Calcular reajuste e gerar texto", type="primary"):
             f"CI -  {ci_formatado} - Preço"
         )
 
-        st.success("Reajuste calculado com sucesso.")
-
-        st.subheader("Resultado do cálculo")
-
-        col1, col2 = st.columns(2)
-
-        col1.metric(
-            "Preço anterior",
-            f"R$ {anterior_formatado}"
-        )
-
-        col2.metric(
-            "Preço negociado",
-            f"R$ {negociado_formatado}"
-        )
-
-        st.caption(
-            f"Reajuste aplicado: {ipca_formatado}"
-        )
-
-        st.subheader("Texto padrão gerado")
-
-        st.text_area(
-            "Texto pronto para copiar",
-            value=texto_final,
-            height=250
-        )
-
-        st.download_button(
-            label="Baixar texto em TXT",
-            data=texto_final,
-            file_name="aniversario_contrato.txt",
-            mime="text/plain"
-        )
+        st.session_state.texto_final = texto_final
+        st.session_state.preco_negociado = negociado_formatado
 
     except (ValueError, InvalidOperation):
+        st.session_state.texto_final = ""
+        st.session_state.preco_negociado = ""
         st.error(
             "Confira os valores informados. "
-            "Utilize, por exemplo, IPCA 4,58 e preço 6,9588."
+            "Exemplos: IPCA 4,58 e preço 6,9588."
         )
+
+
+# =====================================================
+# EXIBIÇÃO DO RESULTADO
+# =====================================================
+
+if st.session_state.preco_negociado:
+    st.success("Reajuste calculado com sucesso.")
+
+    col1, col2 = st.columns(2)
+
+    col1.metric(
+        "Preço anterior",
+        f"R$ {formatar_decimal(converter_decimal(st.session_state.preco_anterior))}"
+    )
+
+    col2.metric(
+        "Preço negociado",
+        f"R$ {st.session_state.preco_negociado}"
+    )
+
+    st.caption(
+        f"Reajuste aplicado: "
+        f"{formatar_ipca(converter_decimal(st.session_state.ipca))}"
+    )
+
+if st.session_state.texto_final:
+    st.subheader("Texto padrão gerado")
+
+    st.text_area(
+        "Texto pronto para copiar",
+        value=st.session_state.texto_final,
+        height=250,
+        key="resultado_texto"
+    )
+
+    st.download_button(
+        label="Baixar texto em TXT",
+        data=st.session_state.texto_final,
+        file_name="aniversario_contrato.txt",
+        mime="text/plain"
+    )
+
+
+# =====================================================
+# LIMPEZA PARA O PRÓXIMO CLIENTE
+# =====================================================
+
+st.divider()
+st.subheader("Próximo cliente")
+
+st.button(
+    "Limpar para próximo cliente",
+    on_click=limpar_para_proximo_cliente,
+    use_container_width=True,
+    type="secondary"
+)
