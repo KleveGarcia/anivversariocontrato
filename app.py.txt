@@ -1,0 +1,83 @@
+
+import re
+import requests
+from bs4 import BeautifulSoup
+from pathlib import Path
+
+URL_IBGE = "https://www.ibge.gov.br/explica/inflacao.php"
+URL_SECUNDARIA = "https://brasilindicadores.com.br/ipca"
+
+# TEXTO PADRÃO ORIGINAL — preservar redação e preços.
+TEXTO_PADRAO = """**Aniversário de contrato**
+
+**Reajuste de preço devido aniversário de contrato.**
+**IPCA do mês em {ipca}**
+
+**Preço Anterior: R$ 6,9588**
+**Preço Negociado: R$ 7,2789&#x20;**
+
+**CI -  ____________________ - Preço**"""
+
+
+def ler_pagina(url):
+    resposta = requests.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30
+    )
+    resposta.raise_for_status()
+    soup = BeautifulSoup(resposta.text, "html.parser")
+    return re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+
+
+def extrair_percentual(texto):
+    padroes = [
+        r"IPCA acumulado em 12 meses.{0,100}?(\d{1,2},\d{2})\s*%",
+        r"IPCA acumulado de 12 meses.{0,100}?(\d{1,2},\d{2})\s*%",
+    ]
+
+    for padrao in padroes:
+        resultado = re.search(padrao, texto, re.IGNORECASE)
+        if resultado:
+            return resultado.group(1) + "%"
+
+    raise ValueError("Não foi possível identificar o IPCA.")
+
+
+def gerar_texto():
+    # Prioridade: IBGE.
+    ipca_ibge = extrair_percentual(ler_pagina(URL_IBGE))
+
+    # Conferência: Brasil Indicadores.
+    try:
+        ipca_secundario = extrair_percentual(
+            ler_pagina(URL_SECUNDARIA)
+        )
+    except Exception as erro:
+        raise ValueError(
+            f"Não foi possível conferir a segunda fonte: {erro}"
+        )
+
+    if ipca_ibge != ipca_secundario:
+        raise ValueError(
+            f"Os índices divergem: IBGE = {ipca_ibge}; "
+            f"Brasil Indicadores = {ipca_secundario}. "
+            "Confira os períodos antes de gerar o texto."
+        )
+
+    # Somente o percentual é substituído.
+    texto_final = TEXTO_PADRAO.format(ipca=ipca_ibge)
+
+    Path("reajuste_contrato.txt").write_text(
+        texto_final, encoding="utf-8"
+    )
+
+    print(texto_final)
+    print("\nArquivo gerado: reajuste_contrato.txt")
+
+
+if __name__ == "__main__":
+    try:
+        gerar_texto()
+    except Exception as erro:
+        print(f"Atualização não concluída: {erro}")
