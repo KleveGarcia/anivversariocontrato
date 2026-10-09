@@ -14,85 +14,48 @@ st.set_page_config(
     layout="centered"
 )
 
-
-# =========================================================
-# LOGOMARCA CONSIGAZ
-# =========================================================
-
 PASTA_APP = Path(__file__).parent
 ARQUIVO_LOGO = PASTA_APP / "Consigaz.png"
 
-if ARQUIVO_LOGO.exists():
-    st.image(str(ARQUIVO_LOGO), width=300)
-else:
-    st.warning(
-        "Logomarca não encontrada. "
-        "Adicione o arquivo Consigaz.png à pasta do aplicativo."
-    )
-
 
 # =========================================================
-# TÍTULO E ORIENTAÇÕES
+# FUNÇÕES DE ESTADO
 # =========================================================
 
-st.title("Reajuste de Aniversário de Contrato")
+def inicializar_estado():
+    valores_iniciais = {
+        "ipca": "",
+        "preco_anterior": "",
+        "ci": "",
+        "texto_final": "",
+        "preco_negociado": "",
+        "ipca_calculado": "",
+        "preco_anterior_calculado": "",
+        "erro_calculo": ""
+    }
 
-st.write(
-    "Informe o IPCA acumulado em 12 meses, o preço anterior "
-    "e o CI para calcular o reajuste e gerar o comunicado."
-)
+    for chave, valor in valores_iniciais.items():
+        if chave not in st.session_state:
+            st.session_state[chave] = valor
 
-st.markdown(
-    "[Consultar IPCA oficial no IBGE]"
-    "(https://www.ibge.gov.br/explica/inflacao.php)"
-)
-
-st.markdown(
-    "[Conferir IPCA no Brasil Indicadores]"
-    "(https://brasilindicadores.com.br/ipca)"
-)
-
-st.info(
-    "Consulte o acumulado em 12 meses no IBGE, "
-    "fonte prioritária. Informe o percentual manualmente."
-)
-
-
-# =========================================================
-# ESTADO INICIAL DOS CAMPOS
-# =========================================================
-
-CAMPOS = ["ipca", "preco_anterior", "ci"]
-
-for campo in CAMPOS:
-    if campo not in st.session_state:
-        st.session_state[campo] = ""
-
-if "texto_final" not in st.session_state:
-    st.session_state.texto_final = ""
-
-if "preco_negociado" not in st.session_state:
-    st.session_state.preco_negociado = ""
-
-if "ipca_calculado" not in st.session_state:
-    st.session_state.ipca_calculado = ""
-
-if "preco_anterior_calculado" not in st.session_state:
-    st.session_state.preco_anterior_calculado = ""
-
-
-# =========================================================
-# LIMPEZA PARA O PRÓXIMO CLIENTE
-# =========================================================
 
 def limpar_para_proximo_cliente():
-    for campo in CAMPOS:
+    """Limpa os campos e resultados do cliente atual."""
+
+    for campo in [
+        "ipca",
+        "preco_anterior",
+        "ci",
+        "texto_final",
+        "preco_negociado",
+        "ipca_calculado",
+        "preco_anterior_calculado",
+        "erro_calculo"
+    ]:
         st.session_state[campo] = ""
 
-    st.session_state.texto_final = ""
-    st.session_state.preco_negociado = ""
-    st.session_state.ipca_calculado = ""
-    st.session_state.preco_anterior_calculado = ""
+
+inicializar_estado()
 
 
 # =========================================================
@@ -101,7 +64,7 @@ def limpar_para_proximo_cliente():
 
 def converter_decimal(valor):
     """
-    Aceita números no padrão brasileiro, por exemplo:
+    Aceita números no padrão brasileiro:
     4,58
     6,9588
     1.234,5678
@@ -116,11 +79,14 @@ def converter_decimal(valor):
     if "," in valor:
         valor = valor.replace(".", "").replace(",", ".")
 
-    return Decimal(valor)
+    try:
+        return Decimal(valor)
+    except InvalidOperation:
+        raise ValueError("Valor numérico inválido.")
 
 
 def formatar_decimal(valor, casas=4):
-    """Formata valores no padrão brasileiro."""
+    """Formata valores com vírgula decimal."""
 
     valor = valor.quantize(
         Decimal("1").scaleb(-casas),
@@ -135,7 +101,7 @@ def formatar_decimal(valor, casas=4):
 
 
 def formatar_ipca(valor):
-    """Formata o IPCA com duas casas decimais."""
+    """Formata o percentual com duas casas decimais."""
 
     valor = valor.quantize(
         Decimal("0.01"),
@@ -143,6 +109,41 @@ def formatar_ipca(valor):
     )
 
     return f"{valor:.2f}".replace(".", ",") + "%"
+
+
+# =========================================================
+# CABEÇALHO E LOGOMARCA
+# =========================================================
+
+if ARQUIVO_LOGO.exists():
+    st.image(str(ARQUIVO_LOGO), width=300)
+else:
+    st.warning(
+        "Logomarca não encontrada. "
+        "Adicione o arquivo Consigaz.png à pasta do aplicativo."
+    )
+
+st.title("Reajuste de Aniversário de Contrato")
+
+st.write(
+    "Informe o IPCA acumulado em 12 meses e o preço anterior "
+    "para calcular o reajuste e gerar o comunicado."
+)
+
+st.markdown(
+    "[Consultar IPCA oficial no IBGE]"
+    "(https://www.ibge.gov.br/explica/inflacao.php)"
+)
+
+st.markdown(
+    "[Conferir IPCA no Brasil Indicadores]"
+    "(https://brasilindicadores.com.br/ipca)"
+)
+
+st.info(
+    "O IBGE é a fonte prioritária. Consulte o IPCA acumulado "
+    "em 12 meses e informe o percentual manualmente."
+)
 
 
 # =========================================================
@@ -171,7 +172,7 @@ st.text_input(
 
 
 # =========================================================
-# CÁLCULO DO REAJUSTE E GERAÇÃO DO TEXTO
+# CÁLCULO E GERAÇÃO DO TEXTO
 # =========================================================
 
 if st.button(
@@ -180,8 +181,14 @@ if st.button(
     use_container_width=True
 ):
 
+    # Apaga resultados anteriores antes de calcular novamente.
+    st.session_state.texto_final = ""
+    st.session_state.preco_negociado = ""
+    st.session_state.ipca_calculado = ""
+    st.session_state.preco_anterior_calculado = ""
+    st.session_state.erro_calculo = ""
+
     try:
-        # Conversão dos campos informados.
         ipca_numero = converter_decimal(
             st.session_state.ipca
         )
@@ -190,19 +197,20 @@ if st.button(
             st.session_state.preco_anterior
         )
 
-        # Validação dos valores.
+        # Validação do percentual.
         if not Decimal("0") <= ipca_numero <= Decimal("100"):
             raise ValueError(
                 "O IPCA deve estar entre 0% e 100%."
             )
 
+        # Validação do preço anterior.
         if preco_numero <= 0:
             raise ValueError(
                 "O preço anterior deve ser maior que zero."
             )
 
-        # Fórmula do reajuste:
-        # Preço negociado = preço anterior x (1 + IPCA/100)
+        # Fórmula:
+        # Preço negociado = preço anterior x (1 + IPCA / 100)
         preco_negociado = (
             preco_numero
             * (
@@ -225,7 +233,7 @@ if st.button(
             preco_negociado
         )
 
-        # CI manual. Se vazio, mantém uma lacuna.
+        # CI permanece manual.
         ci_formatado = (
             st.session_state.ci.strip()
             if st.session_state.ci.strip()
@@ -233,8 +241,9 @@ if st.button(
         )
 
         # =================================================
-        # TEXTO PADRÃO
-        # Mantém a redação original e os preços formatados.
+        # TEXTO PADRÃO ORIGINAL
+        # Redação preservada; somente os valores variáveis
+        # são preenchidos.
         # =================================================
 
         texto_final = (
@@ -249,7 +258,7 @@ if st.button(
             f"CI -  {ci_formatado} - Preço"
         )
 
-        # Armazena os resultados na sessão.
+        # Armazena os resultados.
         st.session_state.texto_final = texto_final
         st.session_state.preco_negociado = negociado_formatado
         st.session_state.ipca_calculado = ipca_formatado
@@ -257,17 +266,19 @@ if st.button(
             anterior_formatado
         )
 
-    except (ValueError, InvalidOperation):
-        st.session_state.texto_final = ""
-        st.session_state.preco_negociado = ""
-        st.session_state.ipca_calculado = ""
-        st.session_state.preco_anterior_calculado = ""
+    except (ValueError, InvalidOperation) as erro:
+        st.session_state.erro_calculo = str(erro)
 
-        st.error(
-            "Não foi possível calcular o reajuste. "
-            "Confira os campos. Exemplos: IPCA 4,58 "
-            "e preço anterior 6,9588."
-        )
+
+# =========================================================
+# MENSAGENS DE ERRO
+# =========================================================
+
+if st.session_state.erro_calculo:
+    st.error(
+        "Não foi possível calcular o reajuste: "
+        + st.session_state.erro_calculo
+    )
 
 
 # =========================================================
@@ -291,8 +302,8 @@ if st.session_state.preco_negociado:
     )
 
     st.caption(
-        f"Percentual de reajuste aplicado: "
-        f"{st.session_state.ipca_calculado}"
+        "Percentual aplicado: "
+        + st.session_state.ipca_calculado
     )
 
 
@@ -320,7 +331,7 @@ if st.session_state.texto_final:
 
 
 # =========================================================
-# BOTÃO PARA O PRÓXIMO CLIENTE
+# LIMPEZA PARA O PRÓXIMO CLIENTE
 # =========================================================
 
 st.divider()
