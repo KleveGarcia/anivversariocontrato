@@ -22,10 +22,58 @@ st.set_page_config(
 IBGE_URL = "https://www.ibge.gov.br/explica/inflacao.php"
 BRASIL_INDICADORES_URL = "https://brasilindicadores.com.br/ipca"
 
-# Último valor oficial conhecido utilizado como contingência.
-# O aplicativo tenta consultar o IBGE antes de utilizar este valor.
 IPCA_PADRAO = "4,58"
 COMPETENCIA_PADRAO = "Set/2026"
+
+
+# ============================================================
+# LOCALIZAÇÃO DA LOGOMARCA
+# ============================================================
+
+def localizar_logo():
+    """
+    Procura a logomarca em locais comuns do aplicativo.
+    Para publicação no Streamlit Cloud, mantenha a imagem
+    dentro do repositório junto ao app.py.
+    """
+
+    pasta_app = Path(__file__).resolve().parent
+    pasta_execucao = Path.cwd()
+
+    nomes = [
+        "Consigaz.png",
+        "Consigaz(1).png",
+        "consigaz.png",
+        "Logo_consigaz.png",
+        "Logo_consigaz.webp",
+        "Logo_consigaz",
+    ]
+
+    pastas = [pasta_app, pasta_execucao]
+
+    for pasta in pastas:
+        for nome in nomes:
+            caminho = pasta / nome
+            if caminho.is_file():
+                return caminho
+
+    # Última tentativa: procura arquivos de imagem com
+    # "consigaz" no nome, sem diferenciar maiúsculas/minúsculas.
+    for pasta in pastas:
+        try:
+            for caminho in pasta.iterdir():
+                if (
+                    caminho.is_file()
+                    and "consigaz" in caminho.name.lower()
+                    and caminho.suffix.lower() in {
+                        ".png", ".jpg", ".jpeg", ".webp"
+                    }
+                ):
+                    return caminho
+        except OSError:
+            continue
+
+    return None
 
 
 # ============================================================
@@ -33,8 +81,6 @@ COMPETENCIA_PADRAO = "Set/2026"
 # ============================================================
 
 class TextoHTML(HTMLParser):
-    """Extrai texto simples de uma página HTML."""
-
     def __init__(self):
         super().__init__()
         self.textos = []
@@ -50,11 +96,6 @@ class TextoHTML(HTMLParser):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def consultar_ipca_ibge():
-    """
-    Consulta o IBGE e tenta localizar o IPCA acumulado em 12 meses.
-    Retorna (percentual, competência, mensagem).
-    """
-
     try:
         resposta = requests.get(
             IBGE_URL,
@@ -70,15 +111,13 @@ def consultar_ipca_ibge():
 
         parser = TextoHTML()
         parser.feed(resposta.text)
-        texto = parser.obter_texto()
+        texto = re.sub(r"\s+", " ", parser.obter_texto())
 
-        # Normaliza espaços para facilitar a identificação dos dados.
-        texto = re.sub(r"\s+", " ", texto)
-
-        # Busca valores associados ao acumulado de 12 meses.
         padroes = [
-            r"IPCA.{0,100}?acumulad[oa].{0,40}?12\s+meses.{0,100}?(\d{1,2}[,.]\d{2})\s*%",
-            r"acumulad[oa].{0,40}?12\s+meses.{0,100}?IPCA.{0,100}?(\d{1,2}[,.]\d{2})\s*%",
+            r"IPCA.{0,100}?acumulad[oa].{0,40}?12\s+meses"
+            r".{0,100}?(\d{1,2}[,.]\d{2})\s*%",
+            r"acumulad[oa].{0,40}?12\s+meses.{0,100}?IPCA"
+            r".{0,100}?(\d{1,2}[,.]\d{2})\s*%",
             r"(\d{1,2}[,.]\d{2})\s*%.{0,100}?12\s+meses",
         ]
 
@@ -96,22 +135,21 @@ def consultar_ipca_ibge():
 
         if not percentual:
             return None, None, (
-                "Não foi possível identificar automaticamente o "
-                "IPCA acumulado na página do IBGE."
+                "Não foi possível identificar o IPCA na página do IBGE."
             )
 
-        # Tenta identificar a competência próxima ao resultado.
         competencia = None
         meses = (
             "jan", "fev", "mar", "abr", "mai", "jun",
             "jul", "ago", "set", "out", "nov", "dez",
         )
 
-        trecho = texto.lower()
-        posicao = trecho.find(percentual.lower())
+        posicao = texto.lower().find(percentual.lower())
 
         if posicao >= 0:
-            contexto = texto[max(0, posicao - 250):posicao + 250]
+            contexto = texto[
+                max(0, posicao - 250):posicao + 250
+            ]
 
             comp = re.search(
                 r"\b("
@@ -131,13 +169,9 @@ def consultar_ipca_ibge():
         return percentual, competencia, "Consulta ao IBGE realizada."
 
     except requests.RequestException:
-        return None, None, (
-            "Não foi possível acessar o IBGE neste momento."
-        )
+        return None, None, "Não foi possível acessar o IBGE."
     except Exception as erro:
-        return None, None, (
-            f"Falha ao interpretar a página do IBGE: {erro}"
-        )
+        return None, None, f"Falha ao interpretar a página: {erro}"
 
 
 # ============================================================
@@ -155,7 +189,7 @@ if "competencia_ipca" not in st.session_state:
 
 if "origem_ipca" not in st.session_state:
     st.session_state.origem_ipca = (
-        "Valor de contingência; confirme a atualização oficial."
+        "Valor de contingência. Confirme o índice oficial."
     )
 
 if "preco_anterior" not in st.session_state:
@@ -175,8 +209,6 @@ if "ipca_inicializado" not in st.session_state:
 
 
 def atualizar_ipca():
-    """Atualiza o percentual usando a consulta ao IBGE."""
-
     percentual, competencia, mensagem = consultar_ipca_ibge()
 
     if percentual is not None:
@@ -185,24 +217,19 @@ def atualizar_ipca():
         if competencia:
             st.session_state.competencia_ipca = competencia
 
-        st.session_state.origem_ipca = (
-            "Consulta automática ao IBGE."
-        )
+        st.session_state.origem_ipca = "Consulta automática ao IBGE."
         return True, mensagem
 
     st.session_state.origem_ipca = mensagem
     return False, mensagem
 
 
-# Consulta inicial automática.
 if not st.session_state.ipca_inicializado:
     atualizar_ipca()
     st.session_state.ipca_inicializado = True
 
 
 def limpar_para_proximo_cliente():
-    """Limpa os dados do cliente e mantém o IPCA."""
-
     st.session_state.preco_anterior = 0.0
     st.session_state.ci = ""
     st.session_state.texto_final = ""
@@ -210,30 +237,28 @@ def limpar_para_proximo_cliente():
 
 
 # ============================================================
-# ESTILO: MODO CLARO E MODO ESCURO
+# TEMA CLARO / ESCURO
 # ============================================================
 
 if st.session_state.tema == "Escuro":
     fundo = "#111827"
     superficie = "#1f2937"
     texto = "#f3f4f6"
-    texto_secundario = "#d1d5db"
     borda = "#4b5563"
     campo = "#374151"
-    botao_texto = "#ffffff"
 else:
     fundo = "#ffffff"
     superficie = "#f8fafc"
     texto = "#111827"
-    texto_secundario = "#4b5563"
     borda = "#d1d5db"
     campo = "#ffffff"
-    botao_texto = "#111827"
 
 st.markdown(
     f"""
     <style>
-    .stApp {{
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
         background-color: {fundo};
         color: {texto};
     }}
@@ -242,19 +267,10 @@ st.markdown(
         background-color: {fundo};
     }}
 
-    [data-testid="stAppViewContainer"] {{
-        background-color: {fundo};
-    }}
-
-    [data-testid="stMain"] {{
-        background-color: {fundo};
-    }}
-
     [data-testid="stMarkdownContainer"],
     [data-testid="stMarkdownContainer"] p,
     [data-testid="stMarkdownContainer"] li,
-    label,
-    .stCaption {{
+    label {{
         color: {texto} !important;
     }}
 
@@ -281,13 +297,11 @@ st.markdown(
     div.stDownloadButton > button {{
         border: 1px solid {borda};
         border-radius: 8px;
-        color: {texto} !important;
     }}
 
     div.stButton > button:hover,
     div.stDownloadButton > button:hover {{
         border-color: #dc2626;
-        color: #dc2626 !important;
     }}
 
     a {{
@@ -297,10 +311,6 @@ st.markdown(
     hr {{
         border-color: {borda};
     }}
-
-    [data-testid="stVerticalBlockBorderWrapper"] {{
-        border-color: {borda};
-    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -308,7 +318,7 @@ st.markdown(
 
 
 # ============================================================
-# CABEÇALHO: LOGO À ESQUERDA E TEMA À DIREITA
+# CABEÇALHO: LOGO À ESQUERDA E BOTÃO DE TEMA À DIREITA
 # ============================================================
 
 col_logo, col_espaco, col_tema = st.columns(
@@ -317,38 +327,29 @@ col_logo, col_espaco, col_tema = st.columns(
 )
 
 with col_logo:
-    # O código aceita diferentes nomes para o arquivo da logo.
-    pasta = Path(__file__).parent
+    logo = localizar_logo()
 
-    arquivos_logo = [
-        pasta / "Consigaz.png",
-        pasta / "Consigaz.webp",
-        pasta / "Logo_consigaz",
-        pasta / "Logo_consigaz.webp",
-    ]
-
-    logo_encontrada = next(
-        (arquivo for arquivo in arquivos_logo if arquivo.exists()),
-        None,
-    )
-
-    if logo_encontrada:
-        st.image(str(logo_encontrada), width=210)
+    if logo:
+        try:
+            st.image(str(logo), width=220)
+        except Exception as erro:
+            st.error(f"Não foi possível abrir a logomarca: {erro}")
     else:
-        st.warning(
-            "Logo não encontrada. Salve a imagem na pasta do app.py "
-            "com o nome Consigaz.png ou Consigaz.webp."
+        st.error(
+            "Logomarca não encontrada. Adicione o arquivo "
+            "'Consigaz.png' à mesma pasta do app.py e ao repositório "
+            "do Streamlit Cloud."
         )
 
 with col_tema:
-    texto_botao = (
+    rotulo_tema = (
         "☾ Modo escuro"
         if st.session_state.tema == "Claro"
         else "☀ Modo claro"
     )
 
     if st.button(
-        texto_botao,
+        rotulo_tema,
         key="alternar_tema",
         use_container_width=True,
     ):
@@ -361,12 +362,11 @@ with col_tema:
 
 
 st.divider()
-
 st.title("Reajuste de Aniversário de Contrato")
 
 
 # ============================================================
-# IPCA
+# IPCA E FONTES
 # ============================================================
 
 st.subheader("Índice de reajuste")
@@ -374,19 +374,16 @@ st.subheader("Índice de reajuste")
 col_ipca, col_atualizar = st.columns([3, 1])
 
 with col_ipca:
-    ipca_texto = st.text_input(
+    st.text_input(
         "IPCA acumulado em 12 meses (%)",
         key="ipca",
-        help="Percentual editável. Confira a competência antes de utilizar.",
+        help="Percentual editável. Confira a competência antes de usar.",
     )
 
 with col_atualizar:
     st.write("")
     st.write("")
-    if st.button(
-        "Atualizar IPCA",
-        use_container_width=True,
-    ):
+    if st.button("Atualizar IPCA", use_container_width=True):
         consultar_ipca_ibge.clear()
         sucesso, mensagem = atualizar_ipca()
 
@@ -400,28 +397,23 @@ with col_atualizar:
 st.caption(
     f"Competência informada: {st.session_state.competencia_ipca}"
 )
-st.caption(
-    f"Situação da consulta: {st.session_state.origem_ipca}"
-)
+st.caption(f"Situação: {st.session_state.origem_ipca}")
 
+st.markdown(f"Fonte oficial: [IBGE — Inflação]({IBGE_URL})")
 st.markdown(
-    f"Fonte oficial: [IBGE — Inflação]({IBGE_URL})"
-)
-st.markdown(
-    f"Referência secundária: "
+    "Referência secundária: "
     f"[Brasil Indicadores — IPCA]({BRASIL_INDICADORES_URL})"
 )
 
 with st.expander("Consultar referência secundária"):
     st.write(
-        "Abra o Brasil Indicadores para conferir o índice publicado "
-        "e compare a competência com a informação oficial do IBGE."
+        "Abra a referência secundária e confira se o índice e a "
+        "competência coincidem com os dados oficiais do IBGE."
     )
     st.link_button(
         "Abrir Brasil Indicadores",
         BRASIL_INDICADORES_URL,
     )
-
 
 st.divider()
 
@@ -448,20 +440,17 @@ st.text_input(
 
 
 # ============================================================
-# CÁLCULO E COMUNICADO
+# CÁLCULO
 # ============================================================
 
 def formatar_moeda(valor):
-    """Formata valores no padrão brasileiro com quatro casas decimais."""
-
     valor_formatado = f"{valor:,.4f}"
-    valor_formatado = (
+    return (
         valor_formatado
         .replace(",", "X")
         .replace(".", ",")
         .replace("X", ".")
     )
-    return valor_formatado
 
 
 col_calcular, col_limpar = st.columns(2)
@@ -501,7 +490,10 @@ if calcular:
 
         preco_negociado = (
             preco_anterior_decimal
-            * (Decimal("1") + ipca_decimal / Decimal("100"))
+            * (
+                Decimal("1")
+                + ipca_decimal / Decimal("100")
+            )
         ).quantize(
             Decimal("0.0001"),
             rounding=ROUND_HALF_UP,
@@ -513,7 +505,6 @@ if calcular:
         preco_negociado_formatado = formatar_moeda(
             preco_negociado
         )
-
         ipca_formatado = str(ipca_decimal).replace(".", ",") + "%"
 
         ci_texto = (
@@ -522,7 +513,7 @@ if calcular:
             else "____________________"
         )
 
-        texto_final = (
+        st.session_state.texto_final = (
             "Aniversário de contrato\n\n"
             "Reajuste de preço devido aniversário de contrato.\n"
             f"IPCA do mês em {ipca_formatado}\n\n"
@@ -532,14 +523,16 @@ if calcular:
         )
 
         st.session_state.resultado_calculo = preco_negociado
-        st.session_state.texto_final = texto_final
 
     except Exception:
         st.error(
-            "Não foi possível calcular. Verifique se o IPCA "
-            "foi informado corretamente."
+            "Não foi possível calcular. Verifique o percentual do IPCA."
         )
 
+
+# ============================================================
+# RESULTADO E DOWNLOAD
+# ============================================================
 
 if st.session_state.resultado_calculo is not None:
     st.divider()
@@ -557,7 +550,7 @@ if st.session_state.resultado_calculo is not None:
     )
 
     st.download_button(
-        label="Baixar comunicado em TXT",
+        "Baixar comunicado em TXT",
         data=st.session_state.texto_final,
         file_name="aniversario_contrato.txt",
         mime="text/plain",
