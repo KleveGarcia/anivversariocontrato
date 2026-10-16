@@ -22,8 +22,8 @@ st.set_page_config(
 IBGE_URL = "https://www.ibge.gov.br/explica/inflacao.php"
 BRASIL_INDICADORES_URL = "https://brasilindicadores.com.br/ipca"
 
-# Valor de contingência caso o IBGE não possa ser consultado.
-# Confirme a competência e o percentual antes de utilizar.
+# Valor de contingência caso a consulta ao IBGE falhe.
+# Confirme o percentual e a competência antes de utilizar.
 IPCA_PADRAO = "4,58"
 COMPETENCIA_PADRAO = "Set/2026"
 
@@ -33,9 +33,7 @@ COMPETENCIA_PADRAO = "Set/2026"
 # ============================================================
 
 def localizar_logo():
-    """
-    Procura a logo na pasta do app.py e no diretório de execução.
-    """
+    """Procura a logomarca nas pastas do aplicativo."""
 
     pasta_app = Path(__file__).resolve().parent
     pasta_execucao = Path.cwd()
@@ -59,7 +57,8 @@ def localizar_logo():
             if caminho.is_file():
                 return caminho
 
-    # Procura outros arquivos de imagem que contenham "consigaz".
+    # Busca alternativa por nome, sem diferenciar maiúsculas
+    # e minúsculas.
     for pasta in pastas:
         try:
             for caminho in pasta.iterdir():
@@ -81,7 +80,7 @@ def localizar_logo():
 # ============================================================
 
 class TextoHTML(HTMLParser):
-    """Extrai texto simples de uma página HTML."""
+    """Extrai texto de uma página HTML."""
 
     def __init__(self):
         super().__init__()
@@ -99,8 +98,10 @@ class TextoHTML(HTMLParser):
 @st.cache_data(ttl=3600, show_spinner=False)
 def consultar_ipca_ibge():
     """
-    Tenta consultar o IPCA acumulado em 12 meses na página do IBGE.
-    Retorna percentual, competência e mensagem.
+    Consulta a página do IBGE e tenta localizar o IPCA acumulado
+    em 12 meses.
+
+    Retorna: percentual, competência e mensagem.
     """
 
     try:
@@ -118,7 +119,6 @@ def consultar_ipca_ibge():
 
         parser = TextoHTML()
         parser.feed(resposta.text)
-
         texto = re.sub(r"\s+", " ", parser.obter_texto())
 
         padroes = [
@@ -218,7 +218,7 @@ if "ipca_inicializado" not in st.session_state:
 
 
 def atualizar_ipca():
-    """Atualiza o IPCA usando a consulta ao IBGE."""
+    """Atualiza o IPCA a partir da consulta ao IBGE."""
 
     percentual, competencia, mensagem = consultar_ipca_ibge()
 
@@ -242,7 +242,7 @@ if not st.session_state.ipca_inicializado:
 
 
 def limpar_para_proximo_cliente():
-    """Limpa os dados do cliente e mantém o IPCA."""
+    """Limpa os dados do cliente, mantendo o IPCA."""
 
     st.session_state.preco_anterior = 0.0
     st.session_state.ci = ""
@@ -251,19 +251,24 @@ def limpar_para_proximo_cliente():
 
 
 # ============================================================
-# CABEÇALHO: LOGOMARCA NO CANTO SUPERIOR ESQUERDO
+# CABEÇALHO: LOGO À ESQUERDA E TÍTULO AO LADO
 # ============================================================
 
-col_logo, col_espaco = st.columns([1, 3])
+col_logo, col_titulo = st.columns(
+    [1, 2.8],
+    vertical_alignment="center",
+)
 
 with col_logo:
     logo = localizar_logo()
 
     if logo:
         try:
-            st.image(str(logo), width=220)
+            st.image(str(logo), width=200)
         except Exception as erro:
-            st.warning(f"Não foi possível abrir a logomarca: {erro}")
+            st.warning(
+                f"Não foi possível abrir a logomarca: {erro}"
+            )
     else:
         st.warning(
             "Logomarca não encontrada. Salve a imagem como "
@@ -271,9 +276,27 @@ with col_logo:
             "esse arquivo junto com o aplicativo."
         )
 
-st.divider()
+with col_titulo:
+    st.markdown(
+        """
+        <div style="
+            display: flex;
+            align-items: center;
+            min-height: 100px;
+        ">
+            <h2 style="
+                margin: 0;
+                padding: 0;
+                line-height: 1.25;
+            ">
+                Reajuste de Aniversário de Contrato
+            </h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-st.title("Reajuste de Aniversário de Contrato")
+st.divider()
 
 
 # ============================================================
@@ -298,7 +321,10 @@ with col_atualizar:
     st.write("")
     st.write("")
 
-    if st.button("Atualizar IPCA", use_container_width=True):
+    if st.button(
+        "Atualizar IPCA",
+        use_container_width=True,
+    ):
         consultar_ipca_ibge.clear()
         sucesso, mensagem = atualizar_ipca()
 
@@ -329,15 +355,14 @@ st.markdown(
 
 with st.expander("Consultar referência secundária"):
     st.write(
-        "Consulte o índice e a competência no site secundário "
-        "e compare com a informação oficial do IBGE."
+        "Consulte o índice e a competência na referência secundária "
+        "e compare com os dados oficiais do IBGE."
     )
 
     st.link_button(
         "Abrir Brasil Indicadores",
         BRASIL_INDICADORES_URL,
     )
-
 
 st.divider()
 
@@ -381,7 +406,7 @@ def formatar_moeda(valor):
 
 
 # ============================================================
-# BOTÕES
+# BOTÕES DE AÇÃO
 # ============================================================
 
 col_calcular, col_limpar = st.columns(2)
@@ -456,7 +481,7 @@ if calcular:
             else "____________________"
         )
 
-        # Preserva o formato solicitado para o comunicado.
+        # Mantém o padrão de texto solicitado.
         texto_final = (
             "Aniversário de contrato\n\n"
             "Reajuste de preço devido aniversário de contrato.\n"
