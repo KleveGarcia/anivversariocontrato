@@ -22,10 +22,14 @@ st.set_page_config(
 IBGE_URL = "https://www.ibge.gov.br/explica/inflacao.php"
 BRASIL_INDICADORES_URL = "https://brasilindicadores.com.br/ipca"
 
-# Valor de contingência caso a consulta ao IBGE falhe.
-# Confirme o percentual e a competência antes de utilizar.
 IPCA_PADRAO = "4,58"
 COMPETENCIA_PADRAO = "Set/2026"
+
+TEXTO_SEM_CLAUSULA = (
+    " Contrato do cliente não tem clausula de reajuste em "
+    "aniversario de contrato pelo IPCA. Neste caso vamos manter "
+    "o valor atual sem alteração."
+)
 
 
 # ============================================================
@@ -49,17 +53,13 @@ def localizar_logo():
         "Logo_consigaz",
     ]
 
-    pastas = [pasta_app, pasta_execucao]
-
-    for pasta in pastas:
+    for pasta in [pasta_app, pasta_execucao]:
         for nome in nomes:
             caminho = pasta / nome
             if caminho.is_file():
                 return caminho
 
-    # Busca alternativa por nome, sem diferenciar maiúsculas
-    # e minúsculas.
-    for pasta in pastas:
+    for pasta in [pasta_app, pasta_execucao]:
         try:
             for caminho in pasta.iterdir():
                 if (
@@ -80,7 +80,7 @@ def localizar_logo():
 # ============================================================
 
 class TextoHTML(HTMLParser):
-    """Extrai texto de uma página HTML."""
+    """Extrai texto simples de uma página HTML."""
 
     def __init__(self):
         super().__init__()
@@ -98,10 +98,8 @@ class TextoHTML(HTMLParser):
 @st.cache_data(ttl=3600, show_spinner=False)
 def consultar_ipca_ibge():
     """
-    Consulta a página do IBGE e tenta localizar o IPCA acumulado
-    em 12 meses.
-
-    Retorna: percentual, competência e mensagem.
+    Consulta o IPCA acumulado em 12 meses na página do IBGE.
+    Retorna percentual, competência e mensagem.
     """
 
     try:
@@ -207,6 +205,9 @@ if "preco_anterior" not in st.session_state:
 if "ci" not in st.session_state:
     st.session_state.ci = ""
 
+if "tem_clausula" not in st.session_state:
+    st.session_state.tem_clausula = "Sim"
+
 if "texto_final" not in st.session_state:
     st.session_state.texto_final = ""
 
@@ -218,7 +219,7 @@ if "ipca_inicializado" not in st.session_state:
 
 
 def atualizar_ipca():
-    """Atualiza o IPCA a partir da consulta ao IBGE."""
+    """Atualiza o IPCA usando a consulta ao IBGE."""
 
     percentual, competencia, mensagem = consultar_ipca_ibge()
 
@@ -235,7 +236,6 @@ def atualizar_ipca():
     return False, mensagem
 
 
-# Consulta automática na primeira abertura.
 if not st.session_state.ipca_inicializado:
     atualizar_ipca()
     st.session_state.ipca_inicializado = True
@@ -246,12 +246,13 @@ def limpar_para_proximo_cliente():
 
     st.session_state.preco_anterior = 0.0
     st.session_state.ci = ""
+    st.session_state.tem_clausula = "Sim"
     st.session_state.texto_final = ""
     st.session_state.resultado_calculo = None
 
 
 # ============================================================
-# CABEÇALHO: LOGO À ESQUERDA E TÍTULO AO LADO
+# CABEÇALHO: LOGO E TÍTULO NA MESMA LINHA
 # ============================================================
 
 col_logo, col_titulo = st.columns(
@@ -266,9 +267,7 @@ with col_logo:
         try:
             st.image(str(logo), width=200)
         except Exception as erro:
-            st.warning(
-                f"Não foi possível abrir a logomarca: {erro}"
-            )
+            st.warning(f"Não foi possível abrir a logomarca: {erro}")
     else:
         st.warning(
             "Logomarca não encontrada. Salve a imagem como "
@@ -300,69 +299,81 @@ st.divider()
 
 
 # ============================================================
-# ÍNDICE DE REAJUSTE
+# CLÁUSULA DE REAJUSTE
 # ============================================================
 
-st.subheader("Índice de reajuste")
+st.subheader("Condição contratual")
 
-col_ipca, col_atualizar = st.columns([3, 1])
+st.radio(
+    "Contrato tem cláusula de reajuste de aniversário de contrato?",
+    options=["Sim", "Não"],
+    horizontal=True,
+    key="tem_clausula",
+)
 
-with col_ipca:
-    st.text_input(
-        "IPCA acumulado em 12 meses (%)",
-        key="ipca",
-        help=(
-            "Percentual editável. Confira a competência "
-            "antes de utilizar o reajuste."
-        ),
+
+# ============================================================
+# IPCA
+# ============================================================
+
+if st.session_state.tem_clausula == "Sim":
+    st.subheader("Índice de reajuste")
+
+    col_ipca, col_atualizar = st.columns([3, 1])
+
+    with col_ipca:
+        st.text_input(
+            "IPCA acumulado em 12 meses (%)",
+            key="ipca",
+            help=(
+                "Percentual editável. Confira a competência "
+                "antes de utilizar o reajuste."
+            ),
+        )
+
+    with col_atualizar:
+        st.write("")
+        st.write("")
+
+        if st.button(
+            "Atualizar IPCA",
+            use_container_width=True,
+        ):
+            consultar_ipca_ibge.clear()
+            sucesso, mensagem = atualizar_ipca()
+
+            if sucesso:
+                st.success(mensagem)
+            else:
+                st.warning(mensagem)
+
+            st.rerun()
+
+    st.caption(
+        f"Competência informada: {st.session_state.competencia_ipca}"
+    )
+    st.caption(
+        f"Situação da consulta: {st.session_state.origem_ipca}"
     )
 
-with col_atualizar:
-    st.write("")
-    st.write("")
-
-    if st.button(
-        "Atualizar IPCA",
-        use_container_width=True,
-    ):
-        consultar_ipca_ibge.clear()
-        sucesso, mensagem = atualizar_ipca()
-
-        if sucesso:
-            st.success(mensagem)
-        else:
-            st.warning(mensagem)
-
-        st.rerun()
-
-
-st.caption(
-    f"Competência informada: {st.session_state.competencia_ipca}"
-)
-
-st.caption(
-    f"Situação da consulta: {st.session_state.origem_ipca}"
-)
-
-st.markdown(
-    f"Fonte oficial: [IBGE — Inflação]({IBGE_URL})"
-)
-
-st.markdown(
-    "Referência secundária: "
-    f"[Brasil Indicadores — IPCA]({BRASIL_INDICADORES_URL})"
-)
-
-with st.expander("Consultar referência secundária"):
-    st.write(
-        "Consulte o índice e a competência na referência secundária "
-        "e compare com os dados oficiais do IBGE."
+    st.markdown(
+        f"Fonte oficial: [IBGE — Inflação]({IBGE_URL})"
+    )
+    st.markdown(
+        "Referência secundária: "
+        f"[Brasil Indicadores — IPCA]({BRASIL_INDICADORES_URL})"
     )
 
-    st.link_button(
-        "Abrir Brasil Indicadores",
-        BRASIL_INDICADORES_URL,
-    )
+    with st.expander("Consultar referência secundária"):
+        st.write(
+            "Confira o índice e a competência na referência secundária "
+            "e compare com os dados oficiais do IBGE."
+        )
+        st.link_button(
+            "Abrir Brasil Indicadores",
+            BRASIL_INDICADORES_URL,
+        )
+
 
 st.divider()
 
@@ -406,14 +417,14 @@ def formatar_moeda(valor):
 
 
 # ============================================================
-# BOTÕES DE AÇÃO
+# BOTÕES
 # ============================================================
 
-col_calcular, col_limpar = st.columns(2)
+col_gerar, col_limpar = st.columns(2)
 
-with col_calcular:
-    calcular = st.button(
-        "Calcular reajuste",
+with col_gerar:
+    gerar = st.button(
+        "Gerar comunicado",
         type="primary",
         use_container_width=True,
     )
@@ -427,100 +438,118 @@ with col_limpar:
 
 
 # ============================================================
-# CÁLCULO E GERAÇÃO DO COMUNICADO
+# GERAÇÃO DO COMUNICADO
 # ============================================================
 
-if calcular:
-    try:
-        ipca_limpo = (
-            str(st.session_state.ipca)
-            .strip()
-            .replace("%", "")
-            .replace(",", ".")
-        )
+if gerar:
 
-        ipca_decimal = Decimal(ipca_limpo)
-        preco_anterior_decimal = Decimal(
-            str(st.session_state.preco_anterior)
-        )
+    # --------------------------------------------------------
+    # SEM CLÁUSULA: NÃO APLICAR REAJUSTE
+    # --------------------------------------------------------
 
-        if not ipca_decimal.is_finite():
-            st.error("Informe um percentual de IPCA válido.")
-            st.stop()
+    if st.session_state.tem_clausula == "Não":
+        st.session_state.texto_final = TEXTO_SEM_CLAUSULA
+        st.session_state.resultado_calculo = None
 
-        if ipca_decimal < 0:
-            st.error("O IPCA não pode ser negativo.")
-            st.stop()
+    # --------------------------------------------------------
+    # COM CLÁUSULA: CALCULAR REAJUSTE PELO IPCA
+    # --------------------------------------------------------
 
-        preco_negociado = (
-            preco_anterior_decimal
-            * (
-                Decimal("1")
-                + ipca_decimal / Decimal("100")
+    else:
+        try:
+            ipca_limpo = (
+                str(st.session_state.ipca)
+                .strip()
+                .replace("%", "")
+                .replace(",", ".")
             )
-        ).quantize(
-            Decimal("0.0001"),
-            rounding=ROUND_HALF_UP,
-        )
 
-        preco_anterior_formatado = formatar_moeda(
-            preco_anterior_decimal
-        )
+            ipca_decimal = Decimal(ipca_limpo)
+            preco_anterior_decimal = Decimal(
+                str(st.session_state.preco_anterior)
+            )
 
-        preco_negociado_formatado = formatar_moeda(
-            preco_negociado
-        )
+            if not ipca_decimal.is_finite():
+                st.error("Informe um percentual de IPCA válido.")
+                st.stop()
 
-        ipca_formatado = (
-            str(ipca_decimal).replace(".", ",") + "%"
-        )
+            if ipca_decimal < 0:
+                st.error("O IPCA não pode ser negativo.")
+                st.stop()
 
-        ci_texto = (
-            st.session_state.ci.strip()
-            if st.session_state.ci.strip()
-            else "____________________"
-        )
+            preco_negociado = (
+                preco_anterior_decimal
+                * (
+                    Decimal("1")
+                    + ipca_decimal / Decimal("100")
+                )
+            ).quantize(
+                Decimal("0.0001"),
+                rounding=ROUND_HALF_UP,
+            )
 
-        # Mantém o padrão de texto solicitado.
-        texto_final = (
-            "Aniversário de contrato\n\n"
-            "Reajuste de preço devido aniversário de contrato.\n"
-            f"IPCA do mês em {ipca_formatado}\n\n"
-            f"Preço Anterior: R$ {preco_anterior_formatado}\n"
-            f"Preço Negociado: R$ {preco_negociado_formatado} \n\n"
-            f"CI -  {ci_texto} - Preço"
-        )
+            preco_anterior_formatado = formatar_moeda(
+                preco_anterior_decimal
+            )
+            preco_negociado_formatado = formatar_moeda(
+                preco_negociado
+            )
+            ipca_formatado = (
+                str(ipca_decimal).replace(".", ",") + "%"
+            )
 
-        st.session_state.resultado_calculo = preco_negociado
-        st.session_state.texto_final = texto_final
+            ci_texto = (
+                st.session_state.ci.strip()
+                if st.session_state.ci.strip()
+                else "____________________"
+            )
 
-    except Exception:
-        st.error(
-            "Não foi possível calcular. Verifique se o IPCA "
-            "foi informado corretamente."
-        )
+            # Mantém o texto original do comunicado.
+            st.session_state.texto_final = (
+                "Aniversário de contrato\n\n"
+                "Reajuste de preço devido aniversário de contrato.\n"
+                f"IPCA do mês em {ipca_formatado}\n\n"
+                f"Preço Anterior: R$ {preco_anterior_formatado}\n"
+                f"Preço Negociado: R$ {preco_negociado_formatado} \n\n"
+                f"CI -  {ci_texto} - Preço"
+            )
+
+            st.session_state.resultado_calculo = preco_negociado
+
+        except Exception:
+            st.error(
+                "Não foi possível calcular. Verifique se o IPCA "
+                "foi informado corretamente."
+            )
 
 
 # ============================================================
 # RESULTADO E DOWNLOAD
 # ============================================================
 
-if st.session_state.resultado_calculo is not None:
+if st.session_state.texto_final:
     st.divider()
-    st.subheader("Resultado")
+    st.subheader("Comunicado gerado")
 
-    st.metric(
-        "Preço Negociado",
-        (
-            "R$ "
-            + formatar_moeda(
-                st.session_state.resultado_calculo
+    if st.session_state.tem_clausula == "Sim":
+        if st.session_state.resultado_calculo is not None:
+            st.metric(
+                "Preço Negociado",
+                (
+                    "R$ "
+                    + formatar_moeda(
+                        st.session_state.resultado_calculo
+                    )
+                ),
             )
-        ),
-    )
+    else:
+        st.info(
+            "Contrato sem cláusula de reajuste: o preço atual "
+            "será mantido, sem aplicação do IPCA."
+        )
 
     st.text_area(
-        "Comunicado para copiar ou revisar",
+        "Texto do comunicado",
         value=st.session_state.texto_final,
         height=230,
     )
